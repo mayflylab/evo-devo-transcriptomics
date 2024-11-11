@@ -1,0 +1,188 @@
+---
+title: "Estudy of evolutionary novelties in Mayfly"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+````{r terminal_parameters, include=FALSE, warning=FALSE}
+# Get your working directory (where you have your data):
+wd <- "D:/User/Downloads/Workshop_Madrid_dec2023/Workshop_Madrid_dec2023"
+```
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_knit$set(
+  root.dir = normalizePath(wd))
+
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  echo = TRUE,
+  cache=TRUE
+  ) 
+```
+
+```{r, include=FALSE, warning=FALSE}
+setwd(file.path(wd))
+imgdir  <- "./images/"
+statdir <- "./stats/"
+```
+
+
+## Intalling and loading libraries
+
+We use mfuzz through bioconductor. If you don't have bioconductor installed install it using the following code. Do not run the code if you have it installed since it can be little bit slow.
+
+```{r eval=FALSE}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install()
+```
+
+If not installed install mfuzz. If you have installed please skip this steep because it can be time consuming.
+
+```{r eval=FALSE}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("Mfuzz")
+```
+
+Load the necessary libraries. If they are not installed install them using `install.packages`
+
+```{r}
+library("Mfuzz")
+library("Biobase")
+library("kableExtra")
+library("dplyr")
+```
+
+## MFuzz in RNAseq data
+
+###  Import data
+
+We need a table of normalized counts. We just load a table delimited with tabulator to R with the data. 
+
+```{r}
+rnaseq_counts <- read.delim("./rnaseq_counts.txt", header=TRUE, row.names=1)
+head(rnaseq_counts, 5)
+str(rnaseq_counts)
+```
+We define some of the stages that we have in the analysis in a vector for easy reproducibility of the analysis.
+
+```{r}
+stages <- c("e4","e6","e10","e14","eN","mN","latN","adult")
+```
+
+### Prepare data
+
+We transform the data to a matrix because mfuzz can not work with a data frame
+
+```{r}
+matrix_rnaseq_counts <- as.matrix(rnaseq_counts)
+```
+
+We save the data in a new object using `ExpressionSet`
+
+```{r}
+normalizedSet <- ExpressionSet(assayData=matrix_rnaseq_counts)
+```
+
+We filter any possible NA values. We also standardize the expression values so that the average expression value for each gene is zero and the standard deviation of its expression profile is one.
+```{r}
+mayfly.r <- filter.NA(normalizedSet, thres=0.5)
+mayfly.f <- fill.NA(mayfly.r,mode="knnw")
+mayfly.s <- standardise(mayfly.f)
+```
+
+Usually we will optimize the parameters for the MFuzz analysis. This process is memory demanding and for the sake of time we will not be ruining it in this practical.
+
+The parameters used in Mfuzz are:
+
+- **fuzzifier value (m)**: We will determine the optimal setting of fuzzifie value using `mestimate`. This will be only an estimation since the final result tuned depending on the performance of the function. 
+- **number of clusters (cluster)**: final number of clusters. This will be determined using repeated soft clustering for a range of cluster numbers. This will report the minimum centroid distance. The minimum centroid distance can be used as cluster validity index. For an optimal cluster number, we may see a ‘drop’ of minimum centroid distance wh plotted versus a range of cluster number and a slower decrease of the minimum centroid distance for higher cluster number.
+
+We define the final parameters for the Mfuzz analysis.
+
+```{r}
+m=1.43
+cluster=30
+```
+
+### Run MFuzz
+
+We perform mfuzz clustering and represent the plot. 
+
+```{r}
+mf <- mfuzz(mayfly.s,c=cluster,m=m)
+mfuzz.plot(mayfly.s,cl=mf, time.labels=stages,new.window=FALSE)
+```
+
+Save the generated clusters in a PDF.
+
+```{r warning=FALSE}
+pdf(paste0(imgdir,"mfuzz_rnaseq_mayfly.pdf"), height=10, width=10)
+mfuzz.plot(mayfly.s,cl=mf, time.labels=stages,new.window=FALSE)
+dev.off()
+```
+
+The results are stored in the `mf` object. Some interesting metrics are:
+- centers:	the final cluster centers.
+- size: the number of genes in each cluster of the closest hard clustering.
+- cluster: indices of the clusters where the genes are assigned to for the closest hard clustering, as obtained by assigning points to the (first) class with maximal membership.
+- membership: a matrix with the membership values of the data points to the clusters.
+
+We can observe this data.
+
+```{r}
+centers <- head(mf$centers)
+kable(centers, caption = "Cluster centers", row.names = TRUE) %>%
+  kable_styling(full_width = FALSE)
+
+membership <- head(mf$membership)
+kable(membership, caption = "Membership", row.names = TRUE) %>%
+  kable_styling(full_width = FALSE)
+
+sizes <- mf$size
+names(sizes) <- 1:cluster
+size <- head(sizes,10)
+kable(t(size), caption = "Cluster size", row.names = F) %>%
+  kable_styling(full_width = FALSE)
+
+hcluster <- head(mf$cluster,10)
+kable(t(hcluster), caption = "Cluster values", row.names = F) %>%
+  kable_styling(full_width = FALSE)
+```
+
+We save the data in a table for downstream analysis.
+
+```{r warning=FALSE}
+write.table( mf$centers, file=paste0(statdir,"Center_mfuzz_rnaseq.txt"), sep="\t")
+write.table( mf$membership, file=paste0(statdir,"Membership_mfuzz_rnaseq.txt"), sep="\t")
+write.table( mf$size, file=paste0(statdir,"Size_mfuzz_rnaseq.txt"), sep="\t")
+write.table( mf$cluster, file=paste0(statdir,"Cluster_mfuzz_rnaseq.txt"), sep="\t")
+```
+
+## MFuzz in atac data
+
+### Import data 
+
+```{r}
+atac_counts <- read.delim("./atac_counts.txt", header=TRUE, row.names=1)
+matrix_atac_counts <- as.matrix(atac_counts)
+```
+
+```{r}
+stages <- c("emb4","emb6","emb8","emb10","emb12","emb14")
+```
+
+## Session info
+
+We show the information of the session to know which software we have been using. This is a important steep to ensure reproducibility.
+
+```{r}
+sessionInfo()
+```
